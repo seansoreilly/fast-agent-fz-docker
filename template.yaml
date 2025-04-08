@@ -1,0 +1,450 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudFormation template for Fast Agent FZ Docker deployment"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for the stack
+
+  ContainerPort:
+    Type: String
+    Default: "7681"
+    Description: Port number the container exposes
+    AllowedPattern: "[0-9]+"
+
+  DesiredCount:
+    Type: String
+    Default: "1"
+    Description: Number of tasks to run
+    AllowedPattern: "[0-9]+"
+
+  # Add CPU and Memory parameters for flexibility
+  ContainerCpu:
+    Type: String
+    Default: "256"
+    Description: CPU units for the container (256 = 0.25 vCPU)
+    AllowedValues: ["256", "512", "1024", "2048", "4096"]
+
+  ContainerMemory:
+    Type: String
+    Default: "512"
+    Description: Memory for the container in MB
+    AllowedValues: ["512", "1024", "2048", "4096", "8192", "16384"]
+
+Mappings:
+  CommonTags:
+    Tags:
+      Project: fast-agent-fz
+      Environment: !Ref EnvironmentName
+      ManagedBy: CloudFormation
+
+Resources:
+  # ECR Repository
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-fast-agent-fz
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-repo
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  # VPC and Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-vpc
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select ["0", !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-subnet-1
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select ["1", !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-subnet-2
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-igw
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PublicRouteTable
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-fast-agent-fz-cluster
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-cluster
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  # ECS Task Execution Role
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${EnvironmentName}-fast-agent-fz
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: fast-agent-fz
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort:
+                Fn::Join:
+                  - ""
+                  - - !Ref ContainerPort
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: fast-agent-fz
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-task
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  # CloudWatch Log Group
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${EnvironmentName}-fast-agent-fz
+      RetentionInDays: 30
+
+  # Load Balancer
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-fast-agent-fz-alb
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Scheme: internet-facing
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-alb
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-fast-agent-fz-tg
+      Port:
+        Fn::Join:
+          - ""
+          - - !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-tg
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  # Security Groups
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for load balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  ContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for fast-agent-fz container
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort:
+            Fn::Join:
+              - ""
+              - - !Ref ContainerPort
+          ToPort:
+            Fn::Join:
+              - ""
+              - - !Ref ContainerPort
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-container-sg
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerListener
+    Properties:
+      ServiceName: !Sub ${EnvironmentName}-fast-agent-fz-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount:
+        Fn::Join:
+          - ""
+          - - !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
+          SecurityGroups:
+            - !Ref ContainerSecurityGroup
+          AssignPublicIp: ENABLED
+      LoadBalancers:
+        - ContainerName: fast-agent-fz
+          ContainerPort:
+            Fn::Join:
+              - ""
+              - - !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-service
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  # Add Auto Scaling
+  AutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 1
+      ResourceId:
+        Fn::Join:
+          - "/"
+          - - service
+            - !Ref ECSCluster
+            - !GetAtt ECSService.Name
+      RoleARN: !GetAtt AutoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-autoscaling
+        - Key: Project
+          Value: !FindInMap [CommonTags, Tags, Project]
+        - Key: Environment
+          Value: !FindInMap [CommonTags, Tags, Environment]
+        - Key: ManagedBy
+          Value: !FindInMap [CommonTags, Tags, ManagedBy]
+
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+
+  AutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${EnvironmentName}-auto-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref AutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70.0
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 300
+
+Outputs:
+  LoadBalancerDNS:
+    Description: DNS name of the load balancer
+    Value: !GetAtt LoadBalancer.DNSName
+
+  ECRRepositoryURI:
+    Description: URI of the ECR repository
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}
+
+  ECSClusterName:
+    Description: Name of the ECS cluster
+    Value: !Ref ECSCluster
+
+  ECSServiceName:
+    Description: Name of the ECS service
+    Value: !GetAtt ECSService.Name
+
+  AutoScalingTargetValue:
+    Description: CPU utilization target for auto scaling
+    Value: "70%"
