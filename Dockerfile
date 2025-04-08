@@ -1,8 +1,13 @@
 FROM debian:bookworm
 
-# Install Python3, Node.js, npm, curl (for download), and dependencies
+# Install basic dependencies first
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip curl unzip ca-certificates git nodejs npm && \
+    apt-get install -y python3 python3-pip curl unzip ca-certificates git && \
+    apt-get clean
+
+# Install Node.js 22.x from NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
     apt-get clean
 
 # Download prebuilt ttyd binary (static Linux build)
@@ -11,6 +16,14 @@ RUN curl -L https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 
 
 # Create a working directory
 WORKDIR /app
+
+# Copy package files for Node.js dependencies
+COPY mcp-fat-zebra/package*.json /app/mcp-fat-zebra/
+# Also copy package.json to /app for MCP server
+COPY mcp-fat-zebra/package.json /app/
+
+# Install Node.js dependencies
+RUN cd /app/mcp-fat-zebra && npm ci
 
 # Copy requirements from fast-agent-fz
 COPY fast-agent-fz/requirements.txt /app/requirements.txt
@@ -34,6 +47,7 @@ COPY fast-agent-fz/fastagent.secrets.yaml /app/
 
 # Copy mcp-fat-zebra files
 COPY mcp-fat-zebra/dist /app/mcp-fat-zebra/dist
+COPY mcp-fat-zebra/src /app/mcp-fat-zebra/src
 
 # Copy our wrapper script
 COPY fast-agent-fz-docker/run_agent.sh /app/run_agent.sh
@@ -45,6 +59,19 @@ EXPOSE 7681
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV NODE_ENV=production
 
 # Launch ttyd to run the agent
-CMD ["ttyd", "-p", "7681", "/app/run_agent.sh"]
+CMD ["ttyd", "-p", "7681", \
+    "-t", "fontFamily=JetBrains Mono", \
+    "-t", "fontSize=14", \
+    "-t", "disableLeaveAlert=true", \
+    "-t", "cursorBlink=true", \
+    "-t", "theme={\"foreground\": \"#333333\", \"background\": \"#ffffff\"}", \
+    "-t", "style=selection-background-color: #add6ff;", \
+    "-t", "style=selection-color: #000000;", \
+    "--writable", \
+    "--terminal-type", "xterm", \
+    "/app/run_agent.sh"]
+
+
