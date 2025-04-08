@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudFormation template for Fast Agent FZ Docker ECR Public Repository"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name for the stack
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: Docker image tag to use
+  ECRPublicAlias:
+    Type: String
+    Default: "a1b2c3d4"
+    Description: Your ECR Public registry alias (get this from the ECR Public console)
+
+Resources:
+  ECRPublicRepository:
+    Type: AWS::ECR::PublicRepository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-fast-agent-fz
+      RepositoryCatalogData:
+        AboutText: "Fast Agent FZ container images for the ${EnvironmentName} environment"
+        UsageText: Docker pull instructions
+        OperatingSystems:
+          - Linux
+        Architectures:
+          - x86_64
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-public-repo
+        - Key: Project
+          Value: fast-agent-fz
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  ECRPublicRepositoryName:
+    Description: Name of the ECR Public Repository
+    Value: !Ref ECRPublicRepository
+    Export:
+      Name: !Sub ${AWS::StackName}-RepoName
+  ECRPublicRegistryAlias:
+    Description: The ECR Public registry alias
+    Value: !Ref ECRPublicAlias
+    Export:
+      Name: !Sub ${AWS::StackName}-RepoAlias
+  ECRPublicRepositoryURI:
+    Description: URI of the ECR Public Repository
+    Value: !Sub public.ecr.aws/${ECRPublicAlias}/${ECRPublicRepository}
+    Export:
+      Name: !Sub ${AWS::StackName}-RepoUri
+  DockerBuildCommand:
+    Description: Command to build Docker image locally
+    Value: !Sub |
+      docker build -t public.ecr.aws/${ECRPublicAlias}/${ECRPublicRepository}:${ImageTag} .
+  DockerLoginCommand:
+    Description: Command to authenticate with ECR Public
+    Value: !Sub |
+      aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+  DockerPushCommand:
+    Description: Command to push Docker image to ECR Public
+    Value: !Sub |
+      docker push public.ecr.aws/${ECRPublicAlias}/${ECRPublicRepository}:${ImageTag}

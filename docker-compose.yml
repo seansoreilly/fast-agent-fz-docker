@@ -1,16 +1,19 @@
-version: '3'
+version: "3.8"
 
 services:
-  fast-agent-web:
+  fat-zebra-agent:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "7681:7681"
-    volumes:
-      - ./logs:/app/logs
-      - ./fast-agent-fz/fastagent.config.yaml:/app/fastagent.config.yaml
-      - ./fast-agent-fz/fastagent.secrets.yaml:/app/fastagent.secrets.yaml
     environment:
-      - PYTHONUNBUFFERED=1
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
     restart: unless-stopped
+    volumes:
+      # Optional: Mount a local directory for persistence
+      #- ./data:/app/data
+      # Optional: Mount AWS credentials from host
+      - ~/.aws:/root/.aws:ro

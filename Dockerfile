@@ -2,8 +2,28 @@ FROM debian:bookworm
 
 # Install basic dependencies first
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip curl unzip ca-certificates git && \
+    apt-get install -y python3 python3-pip curl unzip ca-certificates git apt-transport-https software-properties-common && \
     apt-get clean
+
+# Install AWS CLI v2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm -rf aws awscliv2.zip
+
+# Add Docker's official GPG key and repository
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli && \
+    apt-get clean
+
+# Set empty default values for AWS credentials
+ENV AWS_ACCESS_KEY_ID=""
+ENV AWS_SECRET_ACCESS_KEY=""
+ENV AWS_DEFAULT_REGION="us-east-1"
 
 # Install Node.js 22.x from NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
@@ -18,15 +38,15 @@ RUN curl -L https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 
 WORKDIR /app
 
 # Copy package files for Node.js dependencies
-COPY mcp-fat-zebra/package*.json /app/mcp-fat-zebra/
+COPY src/mcp-fat-zebra/package*.json /app/mcp-fat-zebra/
 # Also copy package.json to /app for MCP server
-COPY mcp-fat-zebra/package.json /app/
+COPY src/mcp-fat-zebra/package.json /app/
 
 # Install Node.js dependencies
 RUN cd /app/mcp-fat-zebra && npm ci
 
 # Copy requirements from fast-agent-fz
-COPY fast-agent-fz/requirements.txt /app/requirements.txt
+COPY src/fast-agent-fz/requirements.txt /app/requirements.txt
 
 # Install uv package manager
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
@@ -41,16 +61,15 @@ RUN uv venv /app/.venv && \
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy fast-agent-fz files
-COPY fast-agent-fz/agent.py /app/
-COPY fast-agent-fz/fastagent.config.yaml /app/
-COPY fast-agent-fz/fastagent.secrets.yaml /app/
+COPY src/fast-agent-fz/agent.py /app/
+COPY src/fast-agent-fz/fastagent.config.yaml /app/
+COPY src/fast-agent-fz/fastagent.secrets.yaml /app/
 
 # Copy mcp-fat-zebra files
-COPY mcp-fat-zebra/dist /app/mcp-fat-zebra/dist
-COPY mcp-fat-zebra/src /app/mcp-fat-zebra/src
+COPY src/mcp-fat-zebra/dist /app/mcp-fat-zebra/dist
 
 # Copy our wrapper script
-COPY fast-agent-fz-docker/run_agent.sh /app/run_agent.sh
+COPY run_agent.sh /app/run_agent.sh
 
 RUN chmod +x /app/run_agent.sh
 
