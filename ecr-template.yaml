@@ -14,6 +14,22 @@ Parameters:
     Type: String
     Default: "a1b2c3d4"
     Description: Your ECR Public registry alias (get this from the ECR Public console)
+  VpcId:
+    Type: String
+    Description: VPC ID to deploy the resources into. Leave empty to use default VPC.
+    Default: ""
+  SubnetIds:
+    Type: String
+    Description: Comma-separated list of Subnet IDs. Leave empty to use default subnets.
+    Default: ""
+  InitialDesiredCount:
+    Type: Number
+    Default: 0
+    Description: Initial number of tasks to run (set to 0 to avoid immediate container pull errors)
+
+Conditions:
+  UseDefaultVPC: !Equals [!Ref VpcId, ""]
+  UseDefaultSubnets: !Equals [!Ref SubnetIds, ""]
 
 Resources:
   ECRPublicRepository:
@@ -31,7 +47,252 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-fast-agent-fz-public-repo
         - Key: Project
-          Value: fast-agent-fz
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # This will only be created if VPC is not specified
+  DefaultVPC:
+    Type: AWS::EC2::VPC
+    Condition: UseDefaultVPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-default-vpc
+
+  # These will only be created if subnets are not specified and we're using the default VPC
+  DefaultSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: UseDefaultVPC
+    Properties:
+      VpcId: !Ref DefaultVPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-subnet-a
+
+  DefaultSubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: UseDefaultVPC
+    Properties:
+      VpcId: !Ref DefaultVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-subnet-b
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Application Load Balancer
+      VpcId: !If [UseDefaultVPC, !GetAtt DefaultVPC.VpcId, !Ref VpcId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-alb-sg
+        - Key: Project
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  FargateServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Fargate service tasks
+      VpcId: !If [UseDefaultVPC, !GetAtt DefaultVPC.VpcId, !Ref VpcId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 7681
+          ToPort: 7681
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fargate-sg
+        - Key: Project
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Path: /
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ecs-task-exec-role
+        - Key: Project
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-fast-agent-fz-cluster
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-cluster
+        - Key: Project
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${EnvironmentName}-fast-agent-fz
+      RetentionInDays: 7
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-log-group
+        - Key: Project
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${EnvironmentName}-fast-agent-fz-task
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      ContainerDefinitions:
+        - Name: fast-agent-fz-container
+          Image: !Sub public.ecr.aws/${ECRPublicAlias}/${ECRPublicRepository}:${ImageTag}
+          PortMappings:
+            - ContainerPort: 7681
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Essential: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-task-def
+        - Key: Project
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-fast-agent-fz-alb
+      Subnets: !If
+        - UseDefaultSubnets
+        - !If
+          - UseDefaultVPC
+          - [!Ref DefaultSubnetA, !Ref DefaultSubnetB]
+          - !Split [",", !Ref SubnetIds]
+        - !Split [",", !Ref SubnetIds]
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Scheme: internet-facing
+      Type: application
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-alb
+        - Key: Project
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-fast-agent-fz-tg
+      VpcId: !If [UseDefaultVPC, !GetAtt DefaultVPC.VpcId, !Ref VpcId]
+      Port: 7681
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-tg
+        - Key: Project
+          Value: fast-agent-fz-docker
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+  FargateService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName: !Sub ${EnvironmentName}-fast-agent-fz-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref InitialDesiredCount
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !If
+            - UseDefaultSubnets
+            - !If
+              - UseDefaultVPC
+              - [!Ref DefaultSubnetA, !Ref DefaultSubnetB]
+              - !Split [",", !Ref SubnetIds]
+            - !Split [",", !Ref SubnetIds]
+          SecurityGroups:
+            - !Ref FargateServiceSecurityGroup
+      LoadBalancers:
+        - ContainerName: fast-agent-fz-container
+          ContainerPort: 7681
+          TargetGroupArn: !Ref ALBTargetGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fast-agent-fz-service
+        - Key: Project
+          Value: fast-agent-fz-docker
         - Key: Environment
           Value: !Ref EnvironmentName
 
@@ -63,3 +324,18 @@ Outputs:
     Description: Command to push Docker image to ECR Public
     Value: !Sub |
       docker push public.ecr.aws/${ECRPublicAlias}/${ECRPublicRepository}:${ImageTag}
+  LoadBalancerDNSName:
+    Description: The DNS name (public URL) of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub ${AWS::StackName}-AlbDnsName
+  ECSServiceName:
+    Description: Name of the ECS Service
+    Value: !Sub ${EnvironmentName}-fast-agent-fz-service
+    Export:
+      Name: !Sub ${AWS::StackName}-ServiceName
+  ECSClusterName:
+    Description: Name of the ECS Cluster
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterName
