@@ -4,7 +4,7 @@
 export PYTHONPATH=/app:$PYTHONPATH
 
 # Print welcome message
-echo "Welcome to FastAgent Console"
+echo "Welcome to Fat Zebra AI"
 echo "Type your queries or commands at the prompt"
 echo "Type 'exit', 'quit', or 'q' to exit the console"
 echo ""

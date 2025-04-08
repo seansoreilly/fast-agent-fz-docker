@@ -64,14 +64,19 @@ ENV NODE_ENV=production
 # Launch ttyd to run the agent
 CMD ["ttyd", "-p", "7681", \
     "-t", "fontFamily=JetBrains Mono", \
-    "-t", "fontSize=14", \
+    "-t", "fontSize=15", \
+    "-t", "fontWeight=500", \
     "-t", "disableLeaveAlert=true", \
     "-t", "cursorBlink=true", \
-    "-t", "theme={\"foreground\": \"#333333\", \"background\": \"#ffffff\"}", \
-    "-t", "style=selection-background-color: #add6ff;", \
-    "-t", "style=selection-color: #000000;", \
+    "-t", "theme={\"foreground\": \"#333333\", \"background\": \"#ffffff\", \"cursor\": \"#0066cc\", \"blue\": \"#0052a3\", \"green\": \"#2d8500\", \"yellow\": \"#a66800\", \"brightBlue\": \"#0066cc\", \"brightGreen\": \"#39a814\", \"brightYellow\": \"#cc8400\"}", \
+    "-t", "style=selection-background-color: #e6f0ff; selection-color: #333333; line-height: 1.5; padding: 12px; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; font-feature-settings: 'kern' 1, 'liga' 1;", \
+    "-t", "scrollback=10000", \
+    "-t", "allowTransparency=false", \
+    "-t", "bellStyle=none", \
     "--writable", \
-    "--terminal-type", "xterm", \
+    "--terminal-type", "xterm-256color", \
+    "--client-option", "fontSize=14", \
+    "--client-option", "disableLeaveAlert=true", \
     "/app/run_agent.sh"]
 
 
