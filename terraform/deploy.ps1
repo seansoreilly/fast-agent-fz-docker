@@ -7,15 +7,66 @@
 # 5. Display the load balancer URL
 
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$ECRPublicAlias,
+    [Parameter(Mandatory = $false)]
+    [string]$ECRPublicAlias = "",
     [string]$EnvironmentName = "dev",
     [string]$ImageTag = "latest",
-    [string]$Region = "us-east-1"
+    [string]$Region = "us-east-1",
+    [string]$RepoName = "fast-agent-fz" # Default repository name
 )
 
 # Set error action preference to stop on any error
 $ErrorActionPreference = "Stop"
+
+# If ECRPublicAlias not provided, fetch it using AWS CLI
+if ([string]::IsNullOrWhiteSpace($ECRPublicAlias)) {
+    Write-Host "ECR Public Alias not provided. Attempting to fetch using AWS CLI..." -ForegroundColor Cyan
+    try {
+        # First, try to find any existing repositories
+        $repos = aws ecr-public describe-repositories --region $Region --no-paginate | ConvertFrom-Json
+        
+        if ($repos.repositories.Count -gt 0) {
+            # Get the repository URI from the first repository
+            $repoUri = $repos.repositories[0].repositoryUri
+            
+            # Extract the alias from the URI in this format: public.ecr.aws/j8s1t0g8/dev-fast-agent-fz
+            # We want the second part (index 1) after splitting by "/"
+            $uriParts = $repoUri -split "/"
+            if ($uriParts.Length -ge 2) {
+                $ECRPublicAlias = $uriParts[1]
+                Write-Host "Found ECR Public Alias: $ECRPublicAlias" -ForegroundColor Green
+                Write-Host "Full repository URI: $repoUri" -ForegroundColor Cyan
+            }
+            else {
+                Write-Error "Invalid repository URI format: $repoUri"
+                exit 1
+            }
+        }
+        else {
+            # No repositories found, try to create one
+            Write-Host "No ECR repositories found. Creating new repository '$RepoName'..." -ForegroundColor Yellow
+            $newRepo = aws ecr-public create-repository --repository-name $RepoName --region $Region --no-paginate | ConvertFrom-Json
+            $repoUri = $newRepo.repository.repositoryUri
+            
+            # Extract the alias from the URI in this format: public.ecr.aws/j8s1t0g8/dev-fast-agent-fz
+            $uriParts = $repoUri -split "/"
+            if ($uriParts.Length -ge 2) {
+                $ECRPublicAlias = $uriParts[1]
+                Write-Host "Created new ECR Public repository with URI: $repoUri" -ForegroundColor Green
+                Write-Host "Extracted alias: $ECRPublicAlias" -ForegroundColor Green
+            }
+            else {
+                Write-Error "Invalid repository URI format: $repoUri"
+                exit 1
+            }
+        }
+    }
+    catch {
+        Write-Error "Failed to get or create ECR Public repository: $_"
+        Write-Host "Please provide the ECR Public Alias manually using the -ECRPublicAlias parameter." -ForegroundColor Yellow
+        exit 1
+    }
+}
 
 # Function to check if a command exists
 function Test-CommandExists {
@@ -132,7 +183,8 @@ Write-Host "`n==== UPDATING ECS SERVICE ===="
 
 try {
     Write-Host "Forcing new deployment of ECS service..."
-    aws ecs update-service --cluster $clusterName --service $serviceName --force-new-deployment --region $Region --no-pager
+    aws ecs update-service --cluster $clusterName --service $serviceName --force-new-deployment --region $Region | Out-Host
+
     if ($LASTEXITCODE -ne 0) {
         Write-Error "ECS service update failed."
         exit 1
@@ -168,7 +220,7 @@ Write-Host "`n==== ENSURING AT LEAST ONE TASK IS RUNNING ===="
 
 try {
     # Check current task count
-    $serviceDetails = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region | ConvertFrom-Json
+    $serviceDetails = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region --no-paginate | ConvertFrom-Json
     $runningCount = $serviceDetails.services[0].runningCount
     $desiredCount = $serviceDetails.services[0].desiredCount
     
@@ -179,7 +231,7 @@ try {
         Write-Host "No running tasks detected. Setting desired count to 1..." -ForegroundColor Yellow
         
         # Update the desired count to 1
-        aws ecs update-service --cluster $clusterName --service $serviceName --desired-count 1 --region $Region
+        aws ecs update-service --cluster $clusterName --service $serviceName --desired-count 1 --region $Region | Out-Host
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to update desired task count."
             exit 1
@@ -195,7 +247,7 @@ try {
         }
         
         # Verify that tasks are now running
-        $serviceDetails = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region | ConvertFrom-Json
+        $serviceDetails = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region --no-paginate | ConvertFrom-Json
         $runningCount = $serviceDetails.services[0].runningCount
         
         if ($runningCount -gt 0) {
@@ -221,7 +273,7 @@ Write-Host "http://$loadBalancerDns" -ForegroundColor Cyan
 
 # Check if tasks are running
 try {
-    $serviceDetails = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region | ConvertFrom-Json
+    $serviceDetails = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region --no-paginate | ConvertFrom-Json
     $runningCount = $serviceDetails.services[0].runningCount
     $desiredCount = $serviceDetails.services[0].desiredCount
     
@@ -230,7 +282,7 @@ try {
     
     if ($runningCount -eq 0) {
         Write-Host "`nWARNING: No running tasks detected. Check ECS task logs for errors:" -ForegroundColor Yellow
-        Write-Host "aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region" -ForegroundColor Yellow
+        Write-Host "aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region --no-paginate" -ForegroundColor Yellow
         Write-Host "aws logs get-log-events --log-group-name /ecs/$EnvironmentName-fast-agent-fz --region $Region" -ForegroundColor Yellow
     }
 }
@@ -239,4 +291,4 @@ catch {
 }
 
 Write-Host "`nTo check the status of your service:"
-Write-Host "aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region" -ForegroundColor DarkGray 
+Write-Host "aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region --no-paginate" -ForegroundColor DarkGray
