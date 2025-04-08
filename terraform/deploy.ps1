@@ -7,7 +7,7 @@
 # 5. Display the load balancer URL
 
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [string]$ECRPublicAlias,
     [string]$EnvironmentName = "dev",
     [string]$ImageTag = "latest",
@@ -132,7 +132,7 @@ Write-Host "`n==== UPDATING ECS SERVICE ===="
 
 try {
     Write-Host "Forcing new deployment of ECS service..."
-    aws ecs update-service --cluster $clusterName --service $serviceName --force-new-deployment --region $Region
+    aws ecs update-service --cluster $clusterName --service $serviceName --force-new-deployment --region $Region --no-pager
     if ($LASTEXITCODE -ne 0) {
         Write-Error "ECS service update failed."
         exit 1
@@ -160,6 +160,57 @@ try {
 }
 catch {
     Write-Error "Error waiting for ECS service: $_"
+    exit 1
+}
+
+# 5.1. Ensure at least one task is running
+Write-Host "`n==== ENSURING AT LEAST ONE TASK IS RUNNING ===="
+
+try {
+    # Check current task count
+    $serviceDetails = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region | ConvertFrom-Json
+    $runningCount = $serviceDetails.services[0].runningCount
+    $desiredCount = $serviceDetails.services[0].desiredCount
+    
+    Write-Host "Current task status: $runningCount running / $desiredCount desired"
+    
+    # If no tasks are running, set desired count to 1
+    if ($runningCount -eq 0) {
+        Write-Host "No running tasks detected. Setting desired count to 1..." -ForegroundColor Yellow
+        
+        # Update the desired count to 1
+        aws ecs update-service --cluster $clusterName --service $serviceName --desired-count 1 --region $Region
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to update desired task count."
+            exit 1
+        }
+        
+        Write-Host "Waiting for the task to start..."
+        
+        # Wait for service to stabilize again
+        aws ecs wait services-stable --cluster $clusterName --services $serviceName --region $Region
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "ECS service did not reach steady state after updating desired count."
+            exit 1
+        }
+        
+        # Verify that tasks are now running
+        $serviceDetails = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region | ConvertFrom-Json
+        $runningCount = $serviceDetails.services[0].runningCount
+        
+        if ($runningCount -gt 0) {
+            Write-Host "Successfully started task. Current running tasks: $runningCount" -ForegroundColor Green
+        }
+        else {
+            Write-Host "WARNING: Still no running tasks. Check the ECS task logs for errors." -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Host "Task already running ($runningCount tasks). No action needed." -ForegroundColor Green
+    }
+}
+catch {
+    Write-Error "Error ensuring minimum task count: $_"
     exit 1
 }
 
