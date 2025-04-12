@@ -13,6 +13,8 @@ param(
     [switch]$RemoveImages = $false
 )
 
+Set-Location 'C:\projects\fast-agent-fz-docker\terraform'
+
 $ErrorActionPreference = "Stop"
 
 function Test-CommandExists {
@@ -76,10 +78,17 @@ function Remove-DockerImages {
     
     Write-Host ""; Write-Host "==== REMOVING DOCKER IMAGES FROM ECR ===="
     try {
-        $images = aws ecr-public describe-images --repository-name $RepoName --region $Region --no-paginate 2>$null | ConvertFrom-Json
+        # Use the correct repository name format with environment
+        $fullRepoName = "$EnvironmentName-$RepoName"
+        Write-Host "Looking for images in repository: $fullRepoName" -ForegroundColor Cyan
         
-        if ($images.imageDetails.Count -eq 0) {
+        $images = aws ecr-public describe-images --repository-name $fullRepoName --region $Region --no-paginate 2>$null | ConvertFrom-Json
+        
+        if ($null -eq $images -or $images.imageDetails.Count -eq 0) {
             Write-Host "No images found in the ECR repository." -ForegroundColor Yellow
+            # Force remove all images as a fallback
+            Write-Host "Attempting to force delete all images..." -ForegroundColor Yellow
+            aws ecr-public batch-delete-image --repository-name $fullRepoName --image-ids imageTag=latest --region $Region 2>$null
             return
         }
         
@@ -88,13 +97,24 @@ function Remove-DockerImages {
             $tag = if ($image.imageTags) { $image.imageTags[0] } else { "<untagged>" }
             $digest = $image.imageDigest
             Write-Host "Removing image: $tag ($digest)" -ForegroundColor Yellow
-            aws ecr-public batch-delete-image --repository-name $RepoName --image-ids imageDigest=$digest --region $Region | Out-Null
+            aws ecr-public batch-delete-image --repository-name $fullRepoName --image-ids imageDigest=$digest --region $Region | Out-Null
         }
         
         Write-Host "All images removed successfully." -ForegroundColor Green
     }
     catch {
         Write-Host "Error removing Docker images: $_" -ForegroundColor Red
+        Write-Host "Attempting to force delete all images..." -ForegroundColor Yellow
+        $fullRepoName = "$EnvironmentName-$RepoName"
+        
+        # Try with both imageTag=latest and imageTag=*
+        try {
+            aws ecr-public batch-delete-image --repository-name $fullRepoName --image-ids imageTag=latest --region $Region 2>$null
+            aws ecr-public batch-delete-image --repository-name $fullRepoName --image-ids imageTag=* --region $Region 2>$null
+        }
+        catch {
+            Write-Host "Force delete failed: $_" -ForegroundColor Red
+        }
     }
 }
 
@@ -139,15 +159,18 @@ function Confirm-Destruction {
 Write-Host "Fast Agent FZ Destruction Script" -ForegroundColor Cyan
 Test-RequiredTools
 
-if ($RemoveImages) {
-    $ECRPublicAlias = Get-Or-CreateECRAlias
-}
-
-$outputs = Get-TerraformOutputs()
+$ECRPublicAlias = Get-Or-CreateECRAlias
+$outputs = Get-TerraformOutputs
 
 if (Confirm-Destruction) {
-    if ($RemoveImages) {
+    # Always remove images if ECR exists to prevent deletion errors
+    if (-not [string]::IsNullOrWhiteSpace($outputs["EcrUri"])) {
+        Write-Host "ECR repository contains images. Removing images first..." -ForegroundColor Yellow
         Remove-DockerImages -ecrUri $outputs["EcrUri"]
+    }
+    elseif ($RemoveImages) {
+        # Fallback if we couldn't get the ECR URI from outputs but user requested image removal
+        Remove-DockerImages -ecrUri ""
     }
     
     $destroyed = Start-TerraformDestroy

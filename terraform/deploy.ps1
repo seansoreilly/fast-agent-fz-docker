@@ -15,6 +15,8 @@ param(
     [string]$RepoName = "$EnvironmentName-fast-agent-fz"
 )
 
+Set-Location 'C:\projects\fast-agent-fz-docker\terraform'
+
 $ErrorActionPreference = "Stop"
 
 function Test-CommandExists {
