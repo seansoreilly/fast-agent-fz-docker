@@ -1,6 +1,6 @@
 output "ecr_public_repository_name" {
   description = "Name of the ECR Public Repository"
-  value       = aws_ecrpublic_repository.repo.repository_name
+  value       = local.repo_name
 }
 
 output "ecr_public_registry_alias" {

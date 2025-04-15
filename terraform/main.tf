@@ -46,7 +46,7 @@ locals {
   name_prefix     = "${var.environment_name}-fast-agent-fz"
   use_default_vpc = var.vpc_id == ""
   container_name  = "${local.name_prefix}-container"
-  container_port  = 7681
+  container_port  = 7860
   repo_name       = "${var.environment_name}-fast-agent-fz"
   repo_uri        = "public.ecr.aws/${var.ecr_public_alias}/${local.repo_name}"
   image_uri       = "${local.repo_uri}:${var.image_tag}"

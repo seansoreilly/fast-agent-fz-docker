@@ -12,7 +12,10 @@ param(
     [string]$EnvironmentName = "dev",
     [string]$ImageTag = "latest",
     [string]$Region = "us-east-1",
-    [string]$RepoName = "$EnvironmentName-fast-agent-fz"
+    [string]$RepoName = "$EnvironmentName-fast-agent-fz",
+    [string]$LocalImageName = "fast-agent-fz-docker-fast-agent-fz",
+    [switch]$SkipTerraformApply,
+    [switch]$SkipWaitStable
 )
 
 Set-Location 'C:\projects\fast-agent-fz-docker\terraform'
@@ -61,10 +64,35 @@ function Test-RequiredTools {
 function Start-TerraformApply {
     Write-Host "==== APPLYING TERRAFORM ===="
     ./terraform.exe init
+    
+    # Read API keys from .env file if they exist
+    $envPath = "../.env"
+    if (Test-Path $envPath) {
+        Get-Content $envPath | ForEach-Object {
+            if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
+                $key = $matches[1].Trim()
+                $value = $matches[2].Trim()
+                if ($key -eq "ANTHROPIC_API_KEY" -or $key -eq "OPENAI_API_KEY") {
+                    Write-Host "Found $key in .env file"
+                    Set-Variable -Name $key -Value $value
+                }
+            }
+        }
+    }
+
+    # If environment variables are not set in .env, try to get them from system environment
+    if (-not $ANTHROPIC_API_KEY) { $ANTHROPIC_API_KEY = $env:ANTHROPIC_API_KEY }
+    if (-not $OPENAI_API_KEY) { $OPENAI_API_KEY = $env:OPENAI_API_KEY }
+
+    Write-Host "API Keys status - ANTHROPIC: $($ANTHROPIC_API_KEY.Length -gt 0) - OPENAI: $($OPENAI_API_KEY.Length -gt 0)"
+
     ./terraform.exe apply -auto-approve `
         -var="ecr_public_alias=$ECRPublicAlias" `
         -var="environment_name=$EnvironmentName" `
-        -var="image_tag=$ImageTag"
+        -var="image_tag=$ImageTag" `
+        -var="anthropic_api_key=$ANTHROPIC_API_KEY" `
+        -var="openai_api_key=$OPENAI_API_KEY"
+    
     Write-Host "Terraform apply successful." -ForegroundColor Green
 }
 
@@ -79,11 +107,32 @@ function Get-TerraformOutputs {
 
 function New-DockerImage {
     param($ecrUri)
-    Write-Host ""; Write-Host "==== BUILDING AND PUSHING DOCKER IMAGE ====" -ForegroundColor Cyan
-    Push-Location ..  # assuming Dockerfile is one directory up
+    Write-Host ""; Write-Host "==== TAGGING AND PUSHING LOCALLY BUILT DOCKER IMAGE ====" -ForegroundColor Cyan
+    Push-Location ..  # moving to project root
     try {
-        docker build -t "${ecrUri}:${ImageTag}" .
-        docker tag "${ecrUri}:${ImageTag}" "${ecrUri}:${ImageTag}"
+        # Check if the local image exists
+        $imageExists = docker images --format "{{.Repository}}" | Select-String -Pattern "^$LocalImageName$"
+        
+        if (-not $imageExists) {
+            Write-Host "Local image '$LocalImageName' not found. Attempting to build it with docker-compose..." -ForegroundColor Yellow
+            try {
+                Write-Host "Running docker-compose up -d --build"
+                docker-compose up -d --build
+                Start-Sleep -Seconds 5  # Wait a bit for the image to be available
+                $imageExists = docker images --format "{{.Repository}}" | Select-String -Pattern "^$LocalImageName$"
+                
+                if (-not $imageExists) {
+                    throw "Failed to build local image with docker-compose."
+                }
+            }
+            catch {
+                Write-Host "Error building image with docker-compose: $_" -ForegroundColor Red
+                throw "Local image not found and auto-build failed. Run docker-compose up first to build the local image."
+            }
+        }
+        
+        Write-Host "Using locally built image: $LocalImageName" -ForegroundColor Green
+        docker tag "${LocalImageName}:latest" "${ecrUri}:${ImageTag}"
         aws ecr-public get-login-password --region $Region | docker login --username AWS --password-stdin public.ecr.aws
         docker push "${ecrUri}:${ImageTag}"
         Write-Host "Docker image pushed to ${ecrUri}:${ImageTag}" -ForegroundColor Green
@@ -92,7 +141,6 @@ function New-DockerImage {
         Pop-Location
     }
 }
-
 
 function Update-ECSService {
     param($clusterName, $serviceName)
@@ -135,6 +183,7 @@ function Write-DeploymentSummary {
     Write-Host ""; Write-Host "==== DEPLOYMENT COMPLETE ===="
     Write-Host "Your application is now running and should be accessible at:"
     Write-Host "http://$loadBalancerDns" -ForegroundColor Cyan
+    Write-Host ""; Write-Host "Note: If you encounter a 502 Bad Gateway error, the health check has been configured to accept 307 redirects." -ForegroundColor Yellow
     $status = aws ecs describe-services --cluster $clusterName --services $serviceName --region $Region | ConvertFrom-Json
     $running = $status.services[0].runningCount
     $desired = $status.services[0].desiredCount
@@ -151,12 +200,27 @@ function Write-DeploymentSummary {
 }
 
 # Main Execution
+& ../setup.ps1 # Run setup script first
 Test-RequiredTools
 $ECRPublicAlias = Get-Or-CreateECRAlias
-Start-TerraformApply
+
+if (-not $SkipTerraformApply) {
+    Start-TerraformApply
+}
+else {
+    Write-Host "==== SKIPPING TERRAFORM APPLY ====" -ForegroundColor Yellow
+}
+
 $outputs = Get-TerraformOutputs
 New-DockerImage -ecrUri $outputs.EcrUri
 Update-ECSService -clusterName $outputs.ClusterName -serviceName $outputs.ServiceName
-Test-ServiceStability -clusterName $outputs.ClusterName -serviceName $outputs.ServiceName
-Test-RunningTask -clusterName $outputs.ClusterName -serviceName $outputs.ServiceName
+
+if (-not $SkipWaitStable) {
+    Test-ServiceStability -clusterName $outputs.ClusterName -serviceName $outputs.ServiceName
+    Test-RunningTask -clusterName $outputs.ClusterName -serviceName $outputs.ServiceName
+}
+else {
+    Write-Host "==== SKIPPING SERVICE STABILITY WAIT ====" -ForegroundColor Yellow
+}
+
 Write-DeploymentSummary -loadBalancerDns $outputs.LoadBalancer -clusterName $outputs.ClusterName -serviceName $outputs.ServiceName

@@ -143,18 +143,6 @@ function Start-TerraformDestroy {
     }
 }
 
-function Confirm-Destruction {
-    if ($Force) { return $true }
-    
-    Write-Host ""
-    Write-Host "WARNING: This will destroy all resources managed by Terraform in the $EnvironmentName environment." -ForegroundColor Red
-    Write-Host "This action cannot be undone and will result in service downtime." -ForegroundColor Red
-    Write-Host ""
-    
-    $confirmation = Read-Host "Type 'destroy' to confirm destruction"
-    return $confirmation -eq "destroy"
-}
-
 # Main Execution
 Write-Host "Fast Agent FZ Destruction Script" -ForegroundColor Cyan
 Test-RequiredTools
@@ -162,29 +150,24 @@ Test-RequiredTools
 $ECRPublicAlias = Get-Or-CreateECRAlias
 $outputs = Get-TerraformOutputs
 
-if (Confirm-Destruction) {
-    # Always remove images if ECR exists to prevent deletion errors
-    if (-not [string]::IsNullOrWhiteSpace($outputs["EcrUri"])) {
-        Write-Host "ECR repository contains images. Removing images first..." -ForegroundColor Yellow
-        Remove-DockerImages -ecrUri $outputs["EcrUri"]
-    }
-    elseif ($RemoveImages) {
-        # Fallback if we couldn't get the ECR URI from outputs but user requested image removal
-        Remove-DockerImages -ecrUri ""
-    }
-    
-    $destroyed = Start-TerraformDestroy
-    
-    if ($destroyed) {
-        Write-Host ""; Write-Host "==== DESTRUCTION COMPLETE ===="
-        Write-Host "All resources in the $EnvironmentName environment have been destroyed." -ForegroundColor Green
-    }
-    else {
-        Write-Host ""; Write-Host "==== DESTRUCTION INCOMPLETE ===="
-        Write-Host "There were errors during the destruction process. Some resources may still exist." -ForegroundColor Yellow
-        Write-Host "Review the Terraform output above for details." -ForegroundColor Yellow
-    }
+# Always remove images if ECR exists to prevent deletion errors
+if (-not [string]::IsNullOrWhiteSpace($outputs["EcrUri"])) {
+    Write-Host "ECR repository contains images. Removing images first..." -ForegroundColor Yellow
+    Remove-DockerImages -ecrUri $outputs["EcrUri"]
+}
+elseif ($RemoveImages) {
+    # Fallback if we couldn't get the ECR URI from outputs but user requested image removal
+    Remove-DockerImages -ecrUri ""
+}
+
+$destroyed = Start-TerraformDestroy
+
+if ($destroyed) {
+    Write-Host ""; Write-Host "==== DESTRUCTION COMPLETE ===="
+    Write-Host "All resources in the $EnvironmentName environment have been destroyed." -ForegroundColor Green
 }
 else {
-    Write-Host "Destruction cancelled by user." -ForegroundColor Yellow
+    Write-Host ""; Write-Host "==== DESTRUCTION INCOMPLETE ===="
+    Write-Host "There were errors during the destruction process. Some resources may still exist." -ForegroundColor Yellow
+    Write-Host "Review the Terraform output above for details." -ForegroundColor Yellow
 } 
