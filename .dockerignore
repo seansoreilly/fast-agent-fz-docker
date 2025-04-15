@@ -1,3 +1,7 @@
+# Git
+.git
+.gitignore
+
 # Python
 __pycache__/
 *.py[cod]
@@ -30,21 +34,23 @@ yarn-error.log
 logs/
 *.log
 
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Terraform
+terraform/
+
+# Documentation
+documentation/
+
 # Environment variables
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
-
-# Docker
-.docker/
-
-# Terraform
-terraform/.terraform/
-terraform/*.tfstate
-terraform/*.tfstate.backup
-terraform/.terraform.lock.hcl
 
 # IDE
 .idea/
@@ -55,6 +61,3 @@ terraform/.terraform.lock.hcl
 # OS specific
 .DS_Store
 Thumbs.db
-
-# Application specific
-app/fastagent.secrets.yaml

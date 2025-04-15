@@ -1,19 +1,22 @@
-version: "3.8"
-
 services:
-  fat-zebra-agent:
+  fast-agent-fz:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "7681:7681"
+      - "7860:7860"
     environment:
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
-    restart: unless-stopped
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FAT_ZEBRA_API_URL=${FAT_ZEBRA_API_URL:-https://gateway.sandbox.fatzebra.com.au/v1.0}
+      - FAT_ZEBRA_USERNAME=${FAT_ZEBRA_USERNAME:-TEST}
+      - FAT_ZEBRA_TOKEN=${FAT_ZEBRA_TOKEN:-TEST}
     volumes:
-      # Optional: Mount a local directory for persistence
-      #- ./data:/app/data
-      # Optional: Mount AWS credentials from host
-      - ~/.aws:/root/.aws:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
