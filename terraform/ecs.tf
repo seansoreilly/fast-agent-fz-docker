@@ -117,6 +117,23 @@ resource "aws_lb_listener" "listener" {
   protocol          = "HTTP"
 
   default_action {
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.alb.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = "arn:aws:acm:us-east-1:151444831552:certificate/5002f00e-3053-4f57-b4fe-0eaeb3d9c7ac"
+
+  default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.target_group.arn
   }

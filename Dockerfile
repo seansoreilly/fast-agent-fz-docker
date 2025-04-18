@@ -74,3 +74,4 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Start the Gradio application directly
 CMD ["python", "gradio_app.py"]
+# CMD ["sleep", "infinity"]
