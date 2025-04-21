@@ -10,12 +10,14 @@ This repository contains a Docker implementation of the Fast Agent Fat Zebra Gra
 ## Quick Start
 
 1. Clone this repository:
+
    ```bash
    git clone https://github.com/yourusername/fast-agent-fz-docker.git
    cd fast-agent-fz-docker
    ```
 
 2. Set up environment variables:
+
    ```bash
    # Create a .env file
    touch .env
@@ -23,7 +25,7 @@ This repository contains a Docker implementation of the Fast Agent Fat Zebra Gra
    # Add your API keys to the .env file
    echo "ANTHROPIC_API_KEY=your_anthropic_api_key" >> .env
    echo "OPENAI_API_KEY=your_openai_api_key" >> .env
-   
+
    # Optional: Configure Fat Zebra credentials (defaults to TEST mode if not provided)
    echo "FAT_ZEBRA_USERNAME=your_username" >> .env
    echo "FAT_ZEBRA_TOKEN=your_token" >> .env
@@ -31,6 +33,7 @@ This repository contains a Docker implementation of the Fast Agent Fat Zebra Gra
    ```
 
 3. Build and start the container:
+
    ```bash
    docker-compose up -d
    ```
@@ -42,18 +45,19 @@ This repository contains a Docker implementation of the Fast Agent Fat Zebra Gra
 
 ```
 fast-agent-fz-docker/
-├── app/                  # Python application files
-│   ├── gradio_app.py     # Main Gradio application
-│   ├── agent.py          # Fat Zebra AI agent implementation
-│   ├── fastagent.config.yaml  # Configuration file
-│   └── static/           # Static assets
-├── mcp-server/           # MCP server files
-│   ├── src/              # TypeScript source code
-│   │   ├── index.ts      # Main entry point
-│   │   └── tools/        # Fat Zebra API tools
-│   └── package.json      # Node.js dependencies
+├── utils/                # Utility scripts (not documented here)
+├── terraform/            # Infrastructure as Code (not documented here)
+├── documentation/        # Project documentation
+├── logs/                 # Log output (may be empty)
+├── .venv/                # Python virtual environment
+├── node_modules/         # Node.js dependencies
 ├── Dockerfile            # Multi-stage Docker build file
 ├── docker-compose.yml    # Docker Compose configuration
+├── package.json          # Node.js dependencies
+├── package-lock.json     # Node.js lock file
+├── setup.ps1             # PowerShell setup script
+├── .dockerignore         # Docker ignore rules
+├── .gitignore            # Git ignore rules
 └── README.md             # This file
 ```
 
@@ -61,17 +65,17 @@ fast-agent-fz-docker/
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude model | Required |
-| `OPENAI_API_KEY` | OpenAI API key (optional) | Optional |
-| `FAT_ZEBRA_USERNAME` | Fat Zebra API username | TEST |
-| `FAT_ZEBRA_TOKEN` | Fat Zebra API token | TEST |
-| `FAT_ZEBRA_API_URL` | Fat Zebra API URL | https://gateway.sandbox.fatzebra.com.au/v1.0 |
+| Variable             | Description                        | Default                                      |
+| -------------------- | ---------------------------------- | -------------------------------------------- |
+| `ANTHROPIC_API_KEY`  | Anthropic API key for Claude model | Required                                     |
+| `OPENAI_API_KEY`     | OpenAI API key (optional)          | Optional                                     |
+| `FAT_ZEBRA_USERNAME` | Fat Zebra API username             | TEST                                         |
+| `FAT_ZEBRA_TOKEN`    | Fat Zebra API token                | TEST                                         |
+| `FAT_ZEBRA_API_URL`  | Fat Zebra API URL                  | https://gateway.sandbox.fatzebra.com.au/v1.0 |
 
 ### Customizing the Configuration
 
-To modify the application configuration, edit the `app/fastagent.config.yaml` file before building the Docker image.
+Edit the relevant environment variables in your `.env` file before building the Docker image.
 
 ## Development
 
@@ -84,7 +88,7 @@ docker build -t fast-agent-fz .
 ### Running in Development Mode
 
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+docker-compose up
 ```
 
 ## Troubleshooting
@@ -92,6 +96,7 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 ### Logs
 
 View container logs:
+
 ```bash
 docker-compose logs -f
 ```
@@ -99,10 +104,12 @@ docker-compose logs -f
 ### Common Issues
 
 1. **Connection refused to port 7860**
+
    - Ensure no other service is using port 7860
    - Check if the container is running: `docker-compose ps`
 
 2. **API Key Issues**
+
    - Verify your API keys are correctly set in the .env file
    - Check the container logs for authentication errors
 
