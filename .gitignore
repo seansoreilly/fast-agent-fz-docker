@@ -45,6 +45,10 @@ terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/.terraform.lock.hcl
+terraform/terraform.exe
+terraform/logs/
+terraform/logs.json
+terraform/service-status.json
 
 # IDE
 .idea/
@@ -58,3 +62,14 @@ Thumbs.db
 
 # Application specific
 app/fastagent.secrets.yaml
+
+# all files in src that were copied in
+src/
+
+.venv/
+
+app/
+documentation/
+mcp-server/
+terraform/app/
+terraform/mcp-server/

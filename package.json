@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "watchfiles": "^0.0.9"
+  }
+}
